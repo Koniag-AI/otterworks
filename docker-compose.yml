@@ -372,6 +372,11 @@ services:
       DEVIN_ORG_ID: ${DEVIN_ORG_ID:-}
       ALERT_WEBHOOK_SECRET: ${ALERT_WEBHOOK_SECRET:-demo-alert-secret}
       CHAOS_SECRET: ${CHAOS_SECRET:-}
+      SERVICENOW_WEBHOOK_SECRET: ${SERVICENOW_WEBHOOK_SECRET:-demo-servicenow-secret}
+      SERVICENOW_INSTANCE_URL: ${SERVICENOW_INSTANCE_URL:-}
+      SERVICENOW_CLIENT_ID: ${SERVICENOW_CLIENT_ID:-}
+      SERVICENOW_CLIENT_SECRET: ${SERVICENOW_CLIENT_SECRET:-}
+      DEVIN_CALLBACK_SECRET: ${DEVIN_CALLBACK_SECRET:-demo-devin-callback-secret}
     depends_on:
       postgres:
         condition: service_healthy

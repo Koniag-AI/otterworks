@@ -1,6 +1,7 @@
 class Incident < ApplicationRecord
   SEVERITIES = %w[low medium high critical].freeze
   STATUSES = %w[open investigating resolved closed].freeze
+  SOURCES = %w[manual servicenow grafana].freeze
   AFFECTED_SERVICES = %w[
     api-gateway auth-service file-service document-service
     collab-service notification-service search-service
@@ -19,10 +20,12 @@ class Incident < ApplicationRecord
   validates :severity, presence: true, inclusion: { in: SEVERITIES }
   validates :status, presence: true, inclusion: { in: STATUSES }
   validates :affected_service, inclusion: { in: AFFECTED_SERVICES }, allow_blank: true
+  validates :source, inclusion: { in: SOURCES }
 
   scope :by_status, ->(status) { where(status: status) }
   scope :by_severity, ->(severity) { where(severity: severity) }
   scope :active, -> { where(status: %w[open investigating]) }
+  scope :from_servicenow, -> { where(source: 'servicenow') }
 
   def investigate!
     transition_to!('investigating')

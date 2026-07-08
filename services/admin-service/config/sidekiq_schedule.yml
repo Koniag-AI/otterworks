@@ -1,0 +1,7 @@
+# Polls Devin API for session status on non-ServiceNow incidents.
+# ServiceNow incidents are handled by the Devin Automations playbook.
+devin_session_poll:
+  every: '60s'
+  class: DevinSessionPollJob
+  queue: default
+  description: 'Poll Devin API for session status updates on active incidents (excludes ServiceNow)'

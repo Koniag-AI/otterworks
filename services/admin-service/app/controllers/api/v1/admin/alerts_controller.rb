@@ -77,6 +77,7 @@ module Api
             status:           auto_investigate ? 'investigating' : 'open',
             affected_service: affected_service,
             reporter_id:      nil, # system-generated
+            source:           'grafana',
           )
 
           session_result = nil
@@ -96,6 +97,9 @@ module Api
 
           Rails.logger.info("Incident #{incident.id} created from alert #{alert_name}, devin=#{session_result.present?}")
 
+          IncidentEventPublisher.incident_created(incident, metadata: { alert_name: alert_name })
+          IncidentEventPublisher.devin_session_started(incident) if session_result
+
           { incident_id: incident.id, alert: alert_name, devin_session: session_result.present? }
         rescue ActiveRecord::RecordInvalid => e
           Rails.logger.error("Failed to create incident from alert #{alert_name}: #{e.message}")
@@ -111,6 +115,7 @@ module Api
           return unless incident
 
           incident.resolve!
+          IncidentEventPublisher.incident_resolved(incident, metadata: { alert_name: alert_name })
           Rails.logger.info("Incident #{incident.id} auto-resolved by Grafana alert #{alert_name}")
         rescue Incident::InvalidTransitionError => e
           Rails.logger.warn("Could not auto-resolve incident #{incident.id} for alert #{alert_name}: #{e.message}")

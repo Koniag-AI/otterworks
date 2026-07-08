@@ -2,6 +2,12 @@ require 'net/http'
 require 'json'
 require 'uri'
 
+# Service for interacting with the Devin AI session API.
+#
+# For ServiceNow incidents, session creation is now handled by the Devin
+# Automation (webhook trigger) rather than direct API calls. The
+# create_session method is retained for non-ServiceNow flows (Grafana
+# alerts, manual incident investigation via admin UI).
 class DevinSessionService
   API_HOST = 'https://api.devin.ai'.freeze
 
@@ -60,6 +66,18 @@ class DevinSessionService
     private
 
     def build_prompt(incident)
+      servicenow_context = if incident.respond_to?(:source) && incident.source == 'servicenow'
+                             <<~SNOW
+
+                               ## ServiceNow Ticket
+                               - **Ticket**: #{incident.servicenow_number}
+                               - **sys_id**: #{incident.servicenow_sys_id}
+                               This incident was auto-created from a ServiceNow bug ticket. After implementing a fix, open a PR. The ServiceNow ticket will be updated automatically with the remediation status and PR link.
+                             SNOW
+                           else
+                             ''
+                           end
+
       <<~PROMPT
         You are investigating an incident in the OtterWorks platform, a collaborative file storage and document editing system (similar to Google Drive + Google Docs) built as a polyglot microservices architecture.
 
@@ -68,7 +86,7 @@ class DevinSessionService
         - **Severity**: #{incident.severity}
         - **Affected Service**: #{incident.affected_service.presence || 'Unknown'}
         - **Description**: #{incident.description}
-
+        #{servicenow_context}
         ## OtterWorks Architecture
         The platform has 11 microservices:
         - API Gateway (Go/Chi, port 8080) - routing, rate limiting, JWT validation

@@ -78,6 +78,31 @@ ActiveRecord::Schema[7.1].define(version: 2024_01_01_000008) do
     t.index ["name"], name: "index_feature_flags_on_name", unique: true
   end
 
+  create_table "incidents", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.string "title", null: false
+    t.text "description", null: false
+    t.string "severity", default: "medium", null: false
+    t.string "status", default: "open", null: false
+    t.string "affected_service"
+    t.string "devin_session_id"
+    t.string "devin_session_url"
+    t.string "devin_session_status"
+    t.uuid "reporter_id"
+    t.datetime "resolved_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "servicenow_sys_id"
+    t.string "servicenow_number"
+    t.string "servicenow_instance_url"
+    t.string "source", default: "manual", null: false
+    t.index ["affected_service"], name: "index_incidents_on_affected_service"
+    t.index ["devin_session_id"], name: "index_incidents_on_devin_session_id", unique: true
+    t.index ["servicenow_sys_id"], name: "index_incidents_on_servicenow_sys_id", unique: true, where: "servicenow_sys_id IS NOT NULL"
+    t.index ["severity"], name: "index_incidents_on_severity"
+    t.index ["source"], name: "index_incidents_on_source"
+    t.index ["status"], name: "index_incidents_on_status"
+  end
+
   create_table "storage_quotas", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
     t.uuid "user_id", null: false
     t.bigint "quota_bytes", default: 5368709120, null: false

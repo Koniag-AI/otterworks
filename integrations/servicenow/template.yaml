@@ -1,0 +1,235 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  OtterWorks ServiceNow → Devin AI Automated Remediation Webhook.
+  Deploys a Lambda function behind API Gateway that receives ServiceNow
+  Business Rule webhooks and creates Devin sessions for bug remediation.
+
+Parameters:
+  DevinApiKey:
+    Type: String
+    NoEcho: true
+    Description: Devin v3 API bearer token
+
+  DevinOrgId:
+    Type: String
+    Description: Devin organization ID
+
+  ServiceNowWebhookSecret:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: >
+      Shared secret for X-ServiceNow-Secret header validation.
+      Leave blank to skip secret verification (not recommended for production).
+
+  ServiceNowInstanceUrl:
+    Type: String
+    Default: ''
+    Description: >
+      ServiceNow instance URL for callbacks (e.g. https://koniag...service-now.com).
+      Leave blank to disable ServiceNow callbacks.
+
+  ServiceNowClientId:
+    Type: String
+    Default: ''
+    Description: OAuth 2.0 client ID for ServiceNow API callbacks
+
+  ServiceNowClientSecret:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: OAuth 2.0 client secret for ServiceNow API callbacks
+
+  LambdaTimeout:
+    Type: Number
+    Default: 60
+    Description: Lambda function timeout in seconds
+
+Resources:
+  # --- IAM Role ---
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${AWS::StackName}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # --- Lambda Function ---
+  WebhookFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-webhook'
+      Runtime: python3.12
+      Handler: lambda_handler.handler
+      Timeout: !Ref LambdaTimeout
+      MemorySize: 256
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        ZipFile: |
+          # Placeholder — deploy.sh packages and uploads the real code.
+          def handler(event, context):
+              return {"statusCode": 200, "body": "placeholder"}
+      Environment:
+        Variables:
+          DEVIN_API_KEY: !Ref DevinApiKey
+          DEVIN_ORG_ID: !Ref DevinOrgId
+          SERVICENOW_WEBHOOK_SECRET: !Ref ServiceNowWebhookSecret
+          SERVICENOW_INSTANCE_URL: !Ref ServiceNowInstanceUrl
+          SERVICENOW_CLIENT_ID: !Ref ServiceNowClientId
+          SERVICENOW_CLIENT_SECRET: !Ref ServiceNowClientSecret
+
+  # --- API Gateway (REST) ---
+  WebhookApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${AWS::StackName}-api'
+      Description: ServiceNow webhook endpoint for Devin AI remediation
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # /health
+  HealthResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ParentId: !GetAtt WebhookApi.RootResourceId
+      PathPart: health
+
+  HealthMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ResourceId: !Ref HealthResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebhookFunction.Arn}/invocations'
+
+  # /api
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ParentId: !GetAtt WebhookApi.RootResourceId
+      PathPart: api
+
+  # /api/v1
+  V1Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ParentId: !Ref ApiResource
+      PathPart: v1
+
+  # /api/v1/admin
+  AdminResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ParentId: !Ref V1Resource
+      PathPart: admin
+
+  # /api/v1/admin/servicenow
+  ServicenowResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ParentId: !Ref AdminResource
+      PathPart: servicenow
+
+  # /api/v1/admin/servicenow/ingest
+  IngestResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ParentId: !Ref ServicenowResource
+      PathPart: ingest
+
+  IngestMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ResourceId: !Ref IngestResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebhookFunction.Arn}/invocations'
+
+  # /api/v1/admin/servicenow/resolve
+  ResolveResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ParentId: !Ref ServicenowResource
+      PathPart: resolve
+
+  ResolveMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref WebhookApi
+      ResourceId: !Ref ResolveResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebhookFunction.Arn}/invocations'
+
+  # --- API Gateway Deployment ---
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - HealthMethod
+      - IngestMethod
+      - ResolveMethod
+    Properties:
+      RestApiId: !Ref WebhookApi
+
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref WebhookApi
+      DeploymentId: !Ref ApiDeployment
+      StageName: prod
+
+  # --- Lambda Permission for API Gateway ---
+  LambdaApiGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebhookFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebhookApi}/*'
+
+Outputs:
+  WebhookEndpoint:
+    Description: ServiceNow webhook endpoint URL (use this in your REST Message)
+    Value: !Sub 'https://${WebhookApi}.execute-api.${AWS::Region}.amazonaws.com/prod/api/v1/admin/servicenow/ingest'
+
+  ResolveEndpoint:
+    Description: Endpoint for resolving incidents from Devin (callback)
+    Value: !Sub 'https://${WebhookApi}.execute-api.${AWS::Region}.amazonaws.com/prod/api/v1/admin/servicenow/resolve'
+
+  HealthEndpoint:
+    Description: Health check URL
+    Value: !Sub 'https://${WebhookApi}.execute-api.${AWS::Region}.amazonaws.com/prod/health'
+
+  LambdaFunctionName:
+    Description: Lambda function name (for updating code via deploy.sh)
+    Value: !Ref WebhookFunction
+
+  ApiGatewayId:
+    Description: API Gateway REST API ID
+    Value: !Ref WebhookApi

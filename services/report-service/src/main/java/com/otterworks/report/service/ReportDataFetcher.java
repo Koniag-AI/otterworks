@@ -205,6 +205,24 @@ public class ReportDataFetcher {
             row.put("active", i % 5 != 0);
             data.add(row);
         }
+
+        // Legacy accounts from 2019 data migration — these records pre-date the
+        // schema standardization in Q3 2021 and have inconsistent field types.
+        // The old user-provisioning system stored numeric fields as text when
+        // the value was unavailable, and some accounts were created without email.
+        for (int i = 25; i < 30; i++) {
+            Map<String, Object> row = new HashMap<>();
+            row.put("user_id", "legacy-" + String.format("%03d", i));
+            row.put("email", i % 2 == 0 ? null : "imported-user" + i + "@otterworks.example.com");
+            row.put("last_login", i == 27 ? "never" : ReportDateUtils.toIsoString(ReportDateUtils.daysAgo(30 + i)));
+            row.put("files_uploaded", i == 28 ? "unknown" : 0);
+            row.put("docs_created", 0);
+            row.put("storage_used_mb", (i % 3 == 0) ? "N/A" : 0);
+            row.put("collaborations", 0);
+            row.put("active", "false");
+            data.add(row);
+        }
+
         return data;
     }
 }

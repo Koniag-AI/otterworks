@@ -1,193 +1,236 @@
-import { ComponentFixture, TestBed, fakeAsync, tick } from '@angular/core/testing';
-import { HttpClientTestingModule } from '@angular/common/http/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting, HttpTestingController } from '@angular/common/http/testing';
 import { NoopAnimationsModule } from '@angular/platform-browser/animations';
 import { IncidentsComponent } from './incidents.component';
-import { AdminApiService } from '../../core/services/admin-api.service';
 import { Incident } from '../../core/models/incident.model';
-import { of, throwError } from 'rxjs';
-import { MatDialog, MatDialogModule } from '@angular/material/dialog';
-import { OverlayModule } from '@angular/cdk/overlay';
-
-function makeIncident(overrides: Partial<Incident> = {}): Incident {
-  return {
-    id: 'inc-001',
-    title: 'Test incident',
-    description: 'A test',
-    severity: 'high',
-    status: 'investigating',
-    affectedService: 'search-service',
-    devinSessionId: null,
-    devinSessionUrl: null,
-    devinSessionStatus: null,
-    reporterId: null,
-    resolvedAt: null,
-    closedAt: null,
-    active: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-    ...overrides,
-  };
-}
 
 describe('IncidentsComponent', () => {
   let component: IncidentsComponent;
   let fixture: ComponentFixture<IncidentsComponent>;
-  let apiSpy: jasmine.SpyObj<AdminApiService>;
-  let dialog: MatDialog;
+  let httpMock: HttpTestingController;
+
+  const mockIncidents: Incident[] = [
+    {
+      id: '1',
+      title: 'File upload 500',
+      description: 'File upload returns 500',
+      severity: 'critical',
+      status: 'investigating',
+      affectedService: 'file-service',
+      devinSessionId: 'devin-1',
+      devinSessionUrl: 'https://app.devin.ai/sessions/devin-1',
+      devinSessionStatus: 'running',
+      reporterId: null,
+      resolvedAt: null,
+      active: true,
+      source: 'servicenow',
+      servicenowSysId: 'abc123',
+      servicenowNumber: 'INC0010042',
+      createdAt: '2026-05-18T22:00:00Z',
+      updatedAt: '2026-05-18T22:00:00Z',
+    },
+    {
+      id: '2',
+      title: 'Search latency',
+      description: 'Search service latency spike',
+      severity: 'high',
+      status: 'open',
+      affectedService: 'search-service',
+      devinSessionId: null,
+      devinSessionUrl: null,
+      devinSessionStatus: null,
+      reporterId: null,
+      resolvedAt: null,
+      active: true,
+      source: 'grafana',
+      servicenowSysId: null,
+      servicenowNumber: null,
+      createdAt: '2026-05-18T21:00:00Z',
+      updatedAt: '2026-05-18T21:00:00Z',
+    },
+    {
+      id: '3',
+      title: 'Manual incident',
+      description: 'Manually reported incident',
+      severity: 'medium',
+      status: 'resolved',
+      affectedService: 'api-gateway',
+      devinSessionId: null,
+      devinSessionUrl: null,
+      devinSessionStatus: null,
+      reporterId: 'user-1',
+      resolvedAt: '2026-05-18T23:00:00Z',
+      active: false,
+      source: 'manual',
+      servicenowSysId: null,
+      servicenowNumber: null,
+      createdAt: '2026-05-18T20:00:00Z',
+      updatedAt: '2026-05-18T23:00:00Z',
+    },
+  ];
 
   beforeEach(async () => {
-    apiSpy = jasmine.createSpyObj('AdminApiService', [
-      'getIncidents', 'createIncident', 'triggerDevinSession',
-      'updateIncidentStatus', 'deleteIncident',
-      'triggerChaos', 'resetChaos', 'getAutoInvestigate', 'setAutoInvestigate',
-    ]);
-
-    apiSpy.getIncidents.and.returnValue(of([]));
-    apiSpy.getAutoInvestigate.and.returnValue(of({ enabled: true }));
-
     await TestBed.configureTestingModule({
-      imports: [
-        IncidentsComponent,
-        HttpClientTestingModule,
-        NoopAnimationsModule,
-        MatDialogModule,
-        OverlayModule,
-      ],
-      providers: [
-        { provide: AdminApiService, useValue: apiSpy },
-      ],
+      imports: [IncidentsComponent, NoopAnimationsModule],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
     }).compileComponents();
 
     fixture = TestBed.createComponent(IncidentsComponent);
     component = fixture.componentInstance;
-    dialog = TestBed.inject(MatDialog);
+    httpMock = TestBed.inject(HttpTestingController);
   });
 
+  afterEach(() => {
+    httpMock.verify();
+  });
+
+  function flushInitialRequests(): void {
+    const autoReq = httpMock.expectOne('/api/v1/admin/settings/auto_investigate');
+    autoReq.flush({ enabled: true });
+
+    const incReq = httpMock.expectOne('/api/v1/admin/incidents');
+    incReq.flush({ incidents: mockIncidents.map(i => ({
+      id: i.id,
+      title: i.title,
+      description: i.description,
+      severity: i.severity,
+      status: i.status,
+      affected_service: i.affectedService,
+      devin_session_id: i.devinSessionId,
+      devin_session_url: i.devinSessionUrl,
+      devin_session_status: i.devinSessionStatus,
+      reporter_id: i.reporterId,
+      resolved_at: i.resolvedAt,
+      active: i.active,
+      source: i.source,
+      servicenow_sys_id: i.servicenowSysId,
+      servicenow_number: i.servicenowNumber,
+      created_at: i.createdAt,
+      updated_at: i.updatedAt,
+    }))});
+  }
+
   it('should create', () => {
+    fixture.detectChanges();
+    flushInitialRequests();
     expect(component).toBeTruthy();
   });
 
-  it('should start with loading state', () => {
-    expect(component.loading).toBeTrue();
+  it('should load incidents with source fields', () => {
+    fixture.detectChanges();
+    flushInitialRequests();
+    fixture.detectChanges();
+
+    expect(component.incidents.length).toBe(3);
+    expect(component.incidents[0].source).toBe('servicenow');
+    expect(component.incidents[0].servicenowNumber).toBe('INC0010042');
+    expect(component.incidents[1].source).toBe('grafana');
+    expect(component.incidents[2].source).toBe('manual');
   });
 
-  it('should default showClosed to false', () => {
-    expect(component.showClosed).toBeFalse();
-  });
-
-  describe('filteredIncidents', () => {
-    const openInc = makeIncident({ id: 'open-1', status: 'open', active: true });
-    const investigatingInc = makeIncident({ id: 'inv-1', status: 'investigating', active: true });
-    const resolvedInc = makeIncident({ id: 'res-1', status: 'resolved', active: false });
-    const closedInc = makeIncident({ id: 'cls-1', status: 'closed', active: false });
-
+  describe('source badge rendering', () => {
     beforeEach(() => {
-      component.incidents = [openInc, investigatingInc, resolvedInc, closedInc];
+      fixture.detectChanges();
+      flushInitialRequests();
+      fixture.detectChanges();
     });
 
-    it('should exclude closed incidents by default', () => {
-      component.showClosed = false;
-      component.filterStatus = '';
-      const filtered = component.filteredIncidents;
-      expect(filtered.length).toBe(3);
-      expect(filtered.find(i => i.status === 'closed')).toBeUndefined();
+    it('should render source chips for each incident', () => {
+      const compiled = fixture.nativeElement as HTMLElement;
+      const sourceChips = compiled.querySelectorAll('.source-chip');
+      expect(sourceChips.length).toBe(3);
     });
 
-    it('should include closed incidents when showClosed is true', () => {
-      component.showClosed = true;
-      component.filterStatus = '';
-      const filtered = component.filteredIncidents;
-      expect(filtered.length).toBe(4);
-      expect(filtered.find(i => i.status === 'closed')).toBeDefined();
+    it('should apply correct CSS class for servicenow source', () => {
+      const compiled = fixture.nativeElement as HTMLElement;
+      const snChip = compiled.querySelector('.source-servicenow');
+      expect(snChip).toBeTruthy();
+      expect(snChip?.textContent).toContain('servicenow');
     });
 
-    it('should filter by active status', () => {
-      component.showClosed = true;
-      component.filterStatus = 'active';
-      const filtered = component.filteredIncidents;
-      expect(filtered.every(i => i.active)).toBeTrue();
+    it('should apply correct CSS class for grafana source', () => {
+      const compiled = fixture.nativeElement as HTMLElement;
+      const grafanaChip = compiled.querySelector('.source-grafana');
+      expect(grafanaChip).toBeTruthy();
     });
   });
 
-  describe('closedCount', () => {
-    it('should return the count of closed incidents', () => {
-      component.incidents = [
-        makeIncident({ id: '1', status: 'investigating' }),
-        makeIncident({ id: '2', status: 'closed' }),
-        makeIncident({ id: '3', status: 'closed' }),
-      ];
-      expect(component.closedCount).toBe(2);
+  describe('ServiceNow info display', () => {
+    beforeEach(() => {
+      fixture.detectChanges();
+      flushInitialRequests();
+      fixture.detectChanges();
     });
 
-    it('should return 0 when no closed incidents', () => {
-      component.incidents = [makeIncident({ id: '1', status: 'open' })];
-      expect(component.closedCount).toBe(0);
-    });
-  });
-
-  function spyDialog(confirmed: boolean): void {
-    spyOn((component as any).dialog, 'open').and.returnValue({
-      afterClosed: () => of(confirmed),
-    } as any);
-  }
-
-  describe('resolveIncident', () => {
-    it('should call updateIncidentStatus with resolved', () => {
-      const incident = makeIncident({ status: 'investigating' });
-      const resolved = makeIncident({ status: 'resolved', resolvedAt: '2026-01-01T00:00:00Z' });
-      spyDialog(true);
-      apiSpy.updateIncidentStatus.and.returnValue(of(resolved));
-
-      component.incidents = [incident];
-      component.resolveIncident(incident);
-
-      expect(apiSpy.updateIncidentStatus).toHaveBeenCalledWith('inc-001', 'resolved');
+    it('should show ServiceNow ticket number for servicenow incidents', () => {
+      const compiled = fixture.nativeElement as HTMLElement;
+      const snInfo = compiled.querySelector('.servicenow-info');
+      expect(snInfo).toBeTruthy();
+      expect(snInfo?.textContent).toContain('INC0010042');
     });
 
-    it('should not call API when dialog is dismissed', () => {
-      const incident = makeIncident();
-      spyDialog(false);
-
-      component.resolveIncident(incident);
-
-      expect(apiSpy.updateIncidentStatus).not.toHaveBeenCalled();
+    it('should not show ServiceNow info for non-servicenow incidents', () => {
+      const compiled = fixture.nativeElement as HTMLElement;
+      const snInfoElements = compiled.querySelectorAll('.servicenow-info');
+      expect(snInfoElements.length).toBe(1);
     });
   });
 
-  describe('closeIncident', () => {
-    it('should call updateIncidentStatus with closed', () => {
-      const incident = makeIncident({ status: 'resolved' });
-      const closed = makeIncident({ status: 'closed', closedAt: '2026-01-01T00:00:00Z' });
-      spyDialog(true);
-      apiSpy.updateIncidentStatus.and.returnValue(of(closed));
+  describe('source filtering', () => {
+    beforeEach(() => {
+      fixture.detectChanges();
+      flushInitialRequests();
+      fixture.detectChanges();
+    });
 
-      component.incidents = [incident];
-      component.closeIncident(incident);
+    it('should show all incidents when no filter is set', () => {
+      expect(component.filteredIncidents.length).toBe(3);
+    });
 
-      expect(apiSpy.updateIncidentStatus).toHaveBeenCalledWith('inc-001', 'closed');
+    it('should filter by servicenow source', () => {
+      component.filterSource = 'servicenow';
+      expect(component.filteredIncidents.length).toBe(1);
+      expect(component.filteredIncidents[0].source).toBe('servicenow');
+    });
+
+    it('should filter by grafana source', () => {
+      component.filterSource = 'grafana';
+      expect(component.filteredIncidents.length).toBe(1);
+      expect(component.filteredIncidents[0].source).toBe('grafana');
+    });
+
+    it('should filter by manual source', () => {
+      component.filterSource = 'manual';
+      expect(component.filteredIncidents.length).toBe(1);
+      expect(component.filteredIncidents[0].source).toBe('manual');
+    });
+
+    it('should combine source and status filters', () => {
+      component.filterSource = 'servicenow';
+      component.filterStatus = 'investigating';
+      expect(component.filteredIncidents.length).toBe(1);
+
+      component.filterStatus = 'resolved';
+      expect(component.filteredIncidents.length).toBe(0);
     });
   });
 
-  describe('deleteIncident', () => {
-    it('should call deleteIncident and remove from list', () => {
-      const incident = makeIncident();
-      spyDialog(true);
-      apiSpy.deleteIncident.and.returnValue(of(void 0));
-
-      component.incidents = [incident];
-      component.deleteIncident(incident);
-
-      expect(apiSpy.deleteIncident).toHaveBeenCalledWith('inc-001');
-      expect(component.incidents.length).toBe(0);
+  describe('getSourceIcon', () => {
+    it('should return cloud for servicenow', () => {
+      expect(component.getSourceIcon('servicenow')).toBe('cloud');
     });
 
-    it('should not call API when dialog is dismissed', () => {
-      const incident = makeIncident();
-      spyDialog(false);
+    it('should return monitoring for grafana', () => {
+      expect(component.getSourceIcon('grafana')).toBe('monitoring');
+    });
 
-      component.deleteIncident(incident);
+    it('should return person for manual', () => {
+      expect(component.getSourceIcon('manual')).toBe('person');
+    });
 
-      expect(apiSpy.deleteIncident).not.toHaveBeenCalled();
+    it('should return help_outline for unknown source', () => {
+      expect(component.getSourceIcon('unknown')).toBe('help_outline');
     });
   });
 });

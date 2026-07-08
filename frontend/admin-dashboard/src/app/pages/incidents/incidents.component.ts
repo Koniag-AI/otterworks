@@ -15,8 +15,7 @@ import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatDialog, MatDialogModule } from '@angular/material/dialog';
 import { AdminApiService } from '../../core/services/admin-api.service';
-import { Incident, AFFECTED_SERVICES } from '../../core/models/incident.model';
-import { ConfirmDialogComponent } from '../../shared/components/confirm-dialog.component';
+import { Incident, AFFECTED_SERVICES, INCIDENT_SOURCES, IncidentSource } from '../../core/models/incident.model';
 import { Subscription, interval } from 'rxjs';
 
 const CHAOS_STATE_KEY = 'ow_admin_chaos_state';
@@ -163,6 +162,22 @@ const CHAOS_STATE_KEY = 'ow_admin_chaos_state';
         </mat-card-content>
       </mat-card>
 
+      <!-- Source filter chips -->
+      <div class="source-filter" *ngIf="!loading && incidents.length > 0">
+        <span class="filter-label">Source:</span>
+        <button mat-stroked-button
+          [class.active-filter]="!filterSource"
+          (click)="filterSource = ''">
+          All
+        </button>
+        <button mat-stroked-button *ngFor="let src of incidentSources"
+          [class.active-filter]="filterSource === src.value"
+          (click)="filterSource = filterSource === src.value ? '' : src.value">
+          <mat-icon class="filter-icon">{{ src.icon }}</mat-icon>
+          {{ src.label }}
+        </button>
+      </div>
+
       <!-- Status summary chips (only show when there are incidents) -->
       <div class="status-summary" *ngIf="!loading && incidents.length > 0">
         <div class="summary-chip active" (click)="filterStatus = filterStatus === 'active' ? '' : 'active'">
@@ -256,6 +271,10 @@ const CHAOS_STATE_KEY = 'ow_admin_chaos_state';
                     <mat-icon class="chip-icon">{{ getStatusIcon(incident.status) }}</mat-icon>
                     {{ incident.status }}
                   </span>
+                  <span class="source-chip" *ngIf="incident.source" [class]="'source-' + incident.source">
+                    <mat-icon class="chip-icon">{{ getSourceIcon(incident.source) }}</mat-icon>
+                    {{ incident.source }}
+                  </span>
                   <span class="service-chip" *ngIf="incident.affectedService">
                     <mat-icon class="chip-icon">dns</mat-icon>
                     {{ incident.affectedService }}
@@ -265,6 +284,12 @@ const CHAOS_STATE_KEY = 'ow_admin_chaos_state';
             </div>
 
             <p class="incident-description">{{ incident.description }}</p>
+
+            <!-- ServiceNow ticket info -->
+            <div class="servicenow-info" *ngIf="incident.source === 'servicenow' && incident.servicenowNumber">
+              <mat-icon>confirmation_number</mat-icon>
+              <span class="sn-number">{{ incident.servicenowNumber }}</span>
+            </div>
 
             <!-- Devin Session Status -->
             <div class="devin-session" *ngIf="incident.devinSessionId">
@@ -319,14 +344,14 @@ const CHAOS_STATE_KEY = 'ow_admin_chaos_state';
       </div>
 
       <!-- Empty state -->
-      <div *ngIf="!loading && filteredIncidents.length === 0 && filterStatus" class="empty-state">
+      <div *ngIf="!loading && filteredIncidents.length === 0 && (filterStatus || filterSource)" class="empty-state">
         <mat-icon>filter_list_off</mat-icon>
-        <p>No {{ filterStatus }} incidents</p>
-        <button mat-stroked-button (click)="filterStatus = ''">Clear Filter</button>
+        <p>No {{ filterSource || filterStatus || '' }} incidents found</p>
+        <button mat-stroked-button (click)="filterStatus = ''; filterSource = ''">Clear Filter</button>
       </div>
 
       <!-- First-run onboarding (no incidents at all) -->
-      <div *ngIf="!loading && incidents.length === 0 && !filterStatus" class="onboarding">
+      <div *ngIf="!loading && incidents.length === 0 && !filterStatus && !filterSource" class="onboarding">
         <mat-card class="onboarding-card">
           <mat-card-content>
             <div class="onboarding-hero">
@@ -414,6 +439,18 @@ const CHAOS_STATE_KEY = 'ow_admin_chaos_state';
     .auto-investigate-toggle{display:flex;align-items:center;justify-content:space-between;padding:16px;background:#e8f0fe;border:1px solid #c2d7f9;border-radius:8px;margin-bottom:16px}
     .toggle-info{flex:1}.toggle-label{display:flex;align-items:center;gap:8px;font-weight:600;font-size:.9rem;color:#1565c0;margin-bottom:4px}
     .toggle-description{font-size:.8rem;color:#555;line-height:1.4}
+    .source-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 10px;border-radius:12px;font-size:.75rem;font-weight:600;text-transform:capitalize}
+    .source-manual{background:#e3f2fd;color:#1565c0}
+    .source-servicenow{background:#e8f5e9;color:#2e7d32}
+    .source-grafana{background:#fff3e0;color:#e65100}
+    .servicenow-info{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#e8f5e9;border:1px solid #c8e6c9;border-radius:8px;font-size:.85rem;color:#2e7d32;margin-top:8px}
+    .servicenow-info .mat-icon{font-size:18px;width:18px;height:18px}
+    .sn-number{font-weight:600}
+    .source-filter{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+    .filter-label{font-size:.85rem;font-weight:600;color:#666}
+    .source-filter button{min-height:32px;font-size:.8rem}
+    .source-filter button .filter-icon{font-size:16px;width:16px;height:16px;margin-right:4px}
+    .active-filter{background:#1565c0 !important;color:#fff !important}
   `],
 })
 export class IncidentsComponent implements OnInit, OnDestroy {
@@ -423,7 +460,9 @@ export class IncidentsComponent implements OnInit, OnDestroy {
   showCreateForm = false;
   showClosed = false;
   filterStatus = '';
+  filterSource: IncidentSource | '' = '';
   affectedServices = AFFECTED_SERVICES;
+  incidentSources = INCIDENT_SOURCES;
   newIncident: Partial<Incident> = { severity: 'high', affectedService: '' };
 
   // Demo Controls state
@@ -484,15 +523,13 @@ export class IncidentsComponent implements OnInit, OnDestroy {
 
   get filteredIncidents(): Incident[] {
     let result = this.incidents;
-
-    if (!this.showClosed) {
-      result = result.filter(i => i.status !== 'closed');
+    if (this.filterSource) {
+      result = result.filter(i => i.source === this.filterSource);
     }
-
-    if (!this.filterStatus) return result;
     if (this.filterStatus === 'active') return result.filter(i => i.active);
     if (this.filterStatus === 'investigating') return result.filter(i => i.status === 'investigating');
-    return result.filter(i => i.status === this.filterStatus);
+    if (this.filterStatus) return result.filter(i => i.status === this.filterStatus);
+    return result;
   }
 
   loadChaosState(): void {
@@ -641,6 +678,15 @@ export class IncidentsComponent implements OnInit, OnDestroy {
       case 'investigating': return 'smart_toy';
       case 'resolved': return 'check_circle';
       case 'closed': return 'cancel';
+      default: return 'help_outline';
+    }
+  }
+
+  getSourceIcon(source: string): string {
+    switch (source) {
+      case 'servicenow': return 'cloud';
+      case 'grafana': return 'monitoring';
+      case 'manual': return 'person';
       default: return 'help_outline';
     }
   }
