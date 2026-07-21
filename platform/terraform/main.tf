@@ -19,7 +19,7 @@ terraform {
   }
 
   backend "s3" {
-    bucket = "otterworks-terraform-state"
+    bucket = "178707646889-us-east-1-otterworks-terraform-state"
     key    = "platform/terraform.tfstate"
     region = "us-east-1"
   }
