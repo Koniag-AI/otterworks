@@ -3,3 +3,6 @@ service:
   identifier: otterworks_apigateway
   orgIdentifier: default
   projectIdentifier: default_project
+  serviceDefinition:
+    spec: {}
+    type: NativeHelm
