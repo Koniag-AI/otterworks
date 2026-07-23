@@ -1,0 +1,5 @@
+service:
+  name: otterworks_api-gateway
+  identifier: otterworks_apigateway
+  orgIdentifier: default
+  projectIdentifier: default_project
