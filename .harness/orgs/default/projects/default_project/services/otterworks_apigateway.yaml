@@ -4,5 +4,24 @@ service:
   orgIdentifier: default
   projectIdentifier: default_project
   serviceDefinition:
-    spec: {}
+    spec:
+      manifests:
+        - manifest:
+            identifier: api_gateway
+            type: HelmChart
+            spec:
+              store:
+                type: Github
+                spec:
+                  connectorRef: KGS_AI_Github
+                  gitFetchType: Branch
+                  folderPath: infrastructure/helm/api-gateway
+                  repoName: otterworks
+                  branch: main
+              subChartPath: ""
+              optionalValuesYaml: false
+              skipResourceVersioning: false
+              enableDeclarativeRollback: false
+              helmVersion: V2
+              fetchHelmChartMetadata: false
     type: NativeHelm
