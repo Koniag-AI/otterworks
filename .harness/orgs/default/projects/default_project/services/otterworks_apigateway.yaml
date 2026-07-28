@@ -22,6 +22,6 @@ service:
               optionalValuesYaml: false
               skipResourceVersioning: false
               enableDeclarativeRollback: false
-              helmVersion: V2
+              helmVersion: V3
               fetchHelmChartMetadata: false
     type: NativeHelm
