@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: 599083837640.dkr.ecr.us-east-1.amazonaws.com/workshop/otterworks-api-gateway
+  repository: 178707646889.dkr.ecr.us-east-1.amazonaws.com/otterworks/api-gateway
   tag: ""  # Set at deploy time (ECR uses IMMUTABLE tags)
   pullPolicy: IfNotPresent
 
