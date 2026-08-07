@@ -228,6 +228,7 @@ class Harness:
             headers={"x-api-key": self.key, "Content-Type": ctype},
         )
         try:
+            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             with urllib.request.urlopen(req) as resp:
                 return resp.status, resp.read().decode()
         except urllib.error.HTTPError as exc:

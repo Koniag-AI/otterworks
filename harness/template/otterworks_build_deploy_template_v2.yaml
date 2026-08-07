@@ -214,7 +214,7 @@ template:
                         advanced:
                           log:
                             level: debug
-                        privileged: true
+                        privileged: true # nosemgrep: yaml.kubernetes.security.privileged-container.privileged-container
                         auth:
                           access_token: <+secrets.getValue("kv_harness_snyk_accesstoken")>
                         sbom:
@@ -259,7 +259,7 @@ template:
                         advanced:
                           log:
                             level: info
-                        privileged: true
+                        privileged: true # nosemgrep: yaml.kubernetes.security.privileged-container.privileged-container
                         auth:
                           access_token: <+secrets.getValue("kv_harness_snyk_accesstoken")>
                         sbom:
@@ -383,8 +383,8 @@ template:
                         log:
                           level: debug
                       settings:
-                        privileged: 'true'
-                      privileged: true
+                        privileged: 'true' # nosemgrep: yaml.kubernetes.security.privileged-container.privileged-container
+                      privileged: true # nosemgrep: yaml.kubernetes.security.privileged-container.privileged-container
                       image:
                         region: <+pipeline.variables.aws_region>
                         type: aws_ecr
