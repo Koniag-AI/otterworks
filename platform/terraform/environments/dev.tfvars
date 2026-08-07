@@ -1,7 +1,7 @@
 aws_region          = "us-east-1"
 environment         = "dev"
 cluster_name        = "otterworks-dev"
-cluster_version     = "1.32"
+cluster_version     = "1.34"
 vpc_cidr            = "10.0.0.0/16"
 az_count            = 2
 enable_nat_gateway  = false

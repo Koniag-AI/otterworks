@@ -16,7 +16,7 @@ variable "cluster_name" {
 variable "cluster_version" {
   description = "Kubernetes version"
   type        = string
-  default     = "1.32"
+  default     = "1.34"
 }
 
 variable "public_subnet_ids" {
@@ -65,7 +65,7 @@ variable "node_max_size" {
 }
 
 variable "ebs_csi_driver_version" {
-  description = "Version of the EBS CSI driver addon"
+  description = "Version of the EBS CSI driver addon. Null selects the default version EKS ships for the cluster version."
   type        = string
-  default     = "v1.37.0-eksbuild.1"
+  default     = null
 }
