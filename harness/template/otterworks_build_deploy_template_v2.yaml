@@ -1,0 +1,566 @@
+template:
+  name: Otterworks Build Deploy Template
+  identifier: Otterworks_Build_Deploy_Template
+  versionLabel: v2
+  type: Pipeline
+  projectIdentifier: default_project
+  orgIdentifier: default
+  tags: {}
+  spec:
+    properties:
+      ci:
+        codebase:
+          connectorRef: <+input>
+          repoName: <+input>
+          build: <+input>
+          sparseCheckout: []
+    variables:
+    - name: servicenow_incident_number
+      type: String
+      description: Optional ServiceNow incident number (e.g. INC0010033) to update on manual/non-PR runs. Leave blank to derive it from the PR title.
+      required: false
+      value: <+input>.default("")
+    - name: aws_connector
+      type: String
+      description: Harness AWS/ECR connector ref used for build/push, SBOM/SLSA/signing.
+      required: false
+      value: <+input>.default("KGS_AWS_ALERT_environment")
+    - name: aws_account_id
+      type: String
+      description: AWS account id hosting the ECR repository.
+      required: false
+      value: <+input>.default("178707646889")
+    - name: aws_region
+      type: String
+      description: AWS region for ECR.
+      required: false
+      value: <+input>.default("us-east-1")
+    - name: ecr_image_path
+      type: String
+      description: ECR image path/repo (e.g. app/service).
+      required: false
+      value: <+input>.default("otterworks/api-gateway")
+    - name: service_workspace
+      type: String
+      description: Repo-relative path scanned/built (workspace for security steps and cd targets).
+      required: false
+      value: <+input>.default("./services/api-gateway")
+    - name: build_context
+      type: String
+      description: Docker build context.
+      required: false
+      value: <+input>.default("./services/api-gateway")
+    - name: dockerfile_path
+      type: String
+      description: Path to the Dockerfile.
+      required: false
+      value: <+input>.default("./services/api-gateway/Dockerfile")
+    - name: build_image
+      type: String
+      description: Container image used for build/test/static-analysis Run steps.
+      required: false
+      value: <+input>.default("golang:1.22")
+    - name: sonar_project_key
+      type: String
+      description: SonarQube project key.
+      required: false
+      value: <+input>.default("Koniag-gs")
+    - name: delegate_selector
+      type: String
+      description: Delegate selector for delegate-bound steps (ServiceNow resolver, Helm deploy).
+      required: false
+      value: <+input>.default("terraform-delegate")
+    - name: servicenow_connector
+      type: String
+      description: ServiceNow connector ref for the post-deploy update.
+      required: false
+      value: <+input>.default("koniaggovernmentservicesllcdemo1")
+    - name: build_command
+      type: String
+      description: Shell command(s) run in the build step (relative to the repo root).
+      required: false
+      value: <+input>.default("go build -o /dev/null ./cmd/server")
+    - name: test_command
+      type: String
+      description: Shell command(s) run in the unit-test step.
+      required: false
+      value: <+input>.default("go test -race -coverprofile=coverage.out ./...")
+    - name: static_analysis_command
+      type: String
+      description: Shell command(s) run in the static-analysis step.
+      required: false
+      value: <+input>.default("go vet ./...")
+    - name: test_intelligence
+      type: String
+      description: Set to "true" to run tests through Harness Test Intelligence (supported languages only); any other value runs a plain Run step.
+      required: false
+      value: <+input>.default("true")
+    stages:
+    - stage:
+        name: Build Otterworks
+        identifier: Build_Otterworks
+        description: ''
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            override: true
+          buildIntelligence:
+            enabled: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+            - step:
+                type: Gitleaks
+                name: Gitleaks
+                identifier: Gitleaks
+                spec:
+                  mode: orchestration
+                  config: default
+                  target:
+                    type: repository
+                    workspace: <+pipeline.variables.service_workspace>
+                    detection: auto
+                  advanced:
+                    log:
+                      level: debug
+            - stepGroup:
+                name: Build and Test
+                identifier: Build_and_Test
+                steps:
+                - parallel:
+                  - step:
+                      type: Test
+                      name: Test Intelligence
+                      identifier: Test_Intelligence
+                      spec:
+                        connectorRef: account.harnessImage
+                        image: <+pipeline.variables.build_image>
+                        shell: Sh
+                        command: 'cd <+pipeline.variables.service_workspace>
+
+                          <+pipeline.variables.test_command>'
+                        intelligenceMode: true
+                      when:
+                        stageStatus: Success
+                        condition: <+pipeline.variables.test_intelligence> == "true"
+                  - step:
+                      type: Run
+                      name: Unit Tests
+                      identifier: Unit_Tests
+                      spec:
+                        connectorRef: account.harnessImage
+                        image: <+pipeline.variables.build_image>
+                        shell: Sh
+                        command: 'cd <+pipeline.variables.service_workspace>
+
+                          <+pipeline.variables.test_command>'
+                      when:
+                        stageStatus: Success
+                        condition: <+pipeline.variables.test_intelligence> != "true"
+                  - step:
+                      type: Run
+                      name: Build Application
+                      identifier: Build_API_Gateway_GO_Service
+                      spec:
+                        connectorRef: account.harnessImage
+                        image: <+pipeline.variables.build_image>
+                        shell: Bash
+                        command: 'cd <+pipeline.variables.service_workspace>
+
+                          <+pipeline.variables.build_command>'
+            - stepGroup:
+                name: SCA
+                identifier: SCA
+                steps:
+                - parallel:
+                  - step:
+                      type: Sonarqube
+                      name: Sonarqube SCA
+                      identifier: Sonarqube_SCA
+                      spec:
+                        mode: orchestration
+                        config: default
+                        target:
+                          type: repository
+                          workspace: <+pipeline.variables.service_workspace>
+                          detection: auto
+                        advanced:
+                          log:
+                            level: debug
+                        auth:
+                          access_token: <+secrets.getValue("kv_harness_sonarqube_accesstoken")>
+                          domain: http://100.24.70.26:9000
+                          ssl: true
+                        tool:
+                          project_key: <+pipeline.variables.sonar_project_key>
+                  - step:
+                      type: Snyk
+                      name: Snyk SCA
+                      identifier: Snyk_SCA
+                      spec:
+                        mode: orchestration
+                        config: oss
+                        target:
+                          type: repository
+                          workspace: <+pipeline.variables.service_workspace>
+                          detection: auto
+                        advanced:
+                          log:
+                            level: debug
+                        privileged: true
+                        auth:
+                          access_token: <+secrets.getValue("kv_harness_snyk_accesstoken")>
+                        sbom:
+                          generate: true
+                          format: spdx-json
+            - stepGroup:
+                name: SAST
+                identifier: SAST
+                steps:
+                - parallel:
+                  - step:
+                      type: Sonarqube
+                      name: Sonarqube SAST
+                      identifier: Sonarqube_SAST
+                      spec:
+                        mode: orchestration
+                        config: default
+                        target:
+                          type: repository
+                          workspace: <+pipeline.variables.service_workspace>
+                          detection: auto
+                        advanced:
+                          log:
+                            level: debug
+                        auth:
+                          access_token: <+secrets.getValue("kv_harness_sonarqube_accesstoken")>
+                          domain: http://100.24.70.26:9000
+                          ssl: true
+                        tool:
+                          project_key: <+pipeline.variables.sonar_project_key>
+                  - step:
+                      type: Snyk
+                      name: Snyk SAST
+                      identifier: Snyk_SAST
+                      spec:
+                        mode: orchestration
+                        config: oss
+                        target:
+                          type: repository
+                          workspace: <+pipeline.variables.service_workspace>
+                          detection: auto
+                        advanced:
+                          log:
+                            level: info
+                        privileged: true
+                        auth:
+                          access_token: <+secrets.getValue("kv_harness_snyk_accesstoken")>
+                        sbom:
+                          generate: true
+                          format: spdx-json
+                  - step:
+                      type: Run
+                      name: Static Analysis
+                      identifier: Go_Static_Analysis
+                      spec:
+                        connectorRef: account.harnessImage
+                        image: <+pipeline.variables.build_image>
+                        shell: Bash
+                        command: 'cd <+pipeline.variables.service_workspace>
+
+                          <+pipeline.variables.static_analysis_command>'
+            - step:
+                type: BuildAndPushECR
+                name: Build and Push Image to ECR
+                identifier: Build_and_Push_API_Gateway_Image_to_ECR
+                spec:
+                  connectorRef: <+pipeline.variables.aws_connector>
+                  region: <+pipeline.variables.aws_region>
+                  account: <+pipeline.variables.aws_account_id>
+                  imageName: <+pipeline.variables.ecr_image_path>
+                  tags:
+                  - <+codebase.shortCommitSha>
+                  caching: true
+                  dockerfile: <+pipeline.variables.dockerfile_path>
+                  context: <+pipeline.variables.build_context>
+            - stepGroup:
+                name: Supply Chain
+                identifier: Supply_Chain
+                steps:
+                - step:
+                    type: SscaOrchestration
+                    name: SBOM Generation
+                    identifier: SBOM_Generation
+                    spec:
+                      mode: generation
+                      tool:
+                        type: Syft
+                        spec:
+                          format: spdx-json
+                      source:
+                        type: ecr
+                        spec:
+                          connector: <+pipeline.variables.aws_connector>
+                          image: <+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].imageName>:<+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].tag>
+                          region: <+pipeline.variables.aws_region>
+                          account: <+secrets.getValue("kgs_alert_om_aws_account_id")>
+                      attestation:
+                        type: keyless
+                        spec:
+                          oidcProvider: harness
+                      sbom_drift:
+                        base: last_generated_sbom
+                      resources:
+                        limits:
+                          memory: 500Mi
+                          cpu: '0.5'
+                - step:
+                    type: provenance
+                    name: SLSA Generation
+                    identifier: SLSA_Generation
+                    spec:
+                      source:
+                        type: ecr
+                        spec:
+                          connector: <+pipeline.variables.aws_connector>
+                          image: <+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].imageName>:<+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].tag>
+                          region: <+pipeline.variables.aws_region>
+                          account: <+secrets.getValue("kgs_alert_om_aws_account_id")>
+                      attestation:
+                        type: keyless
+                        spec:
+                          oidcProvider: harness
+                      resources:
+                        limits:
+                          memory: 500Mi
+                          cpu: '0.5'
+                  contextType: Pipeline
+                - step:
+                    type: SscaArtifactSigning
+                    name: Artifact Signing
+                    identifier: ArtifactSigning_1
+                    spec:
+                      source:
+                        type: ecr
+                        spec:
+                          connector: <+pipeline.variables.aws_connector>
+                          image: <+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].imageName>:<+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].tag>
+                          region: <+pipeline.variables.aws_region>
+                          account: <+secrets.getValue("kgs_alert_om_aws_account_id")>
+                      signing:
+                        type: keyless
+                        spec:
+                          oidcProvider: harness
+                      uploadSignature:
+                        upload: true
+                      resources:
+                        limits:
+                          memory: 500Mi
+                          cpu: '0.5'
+                contextType: Pipeline
+            - stepGroup:
+                name: Container Scan
+                identifier: Container_Scan
+                steps:
+                - step:
+                    type: AquaTrivy
+                    name: AquaTrivy
+                    identifier: AquaTrivy
+                    spec:
+                      mode: orchestration
+                      config: default
+                      target:
+                        type: container
+                        detection: auto
+                      advanced:
+                        log:
+                          level: debug
+                      settings:
+                        privileged: 'true'
+                      privileged: true
+                      image:
+                        region: <+pipeline.variables.aws_region>
+                        type: aws_ecr
+                        tag: <+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].tag>
+                        name: <+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].imageName>
+                        domain: <+pipeline.variables.aws_account_id>.dkr.ecr.<+pipeline.variables.aws_region>.amazonaws.com
+                      sbom:
+                        generate: false
+                        format: spdx-json
+                    failureStrategies:
+                    - onFailure:
+                        errors:
+                        - AllErrors
+                        action:
+                          type: Ignore
+    - stage:
+        name: Update ServiceNow Post Deploy
+        identifier: Update_ServiceNow_Post_Deploy
+        description: Update ServiceNow incident work notes when deploy is complete
+        type: Custom
+        spec:
+          execution:
+            steps:
+            - step:
+                type: ShellScript
+                name: Resolve Incident Number
+                identifier: Resolve_Incident_Number
+                spec:
+                  shell: Bash
+                  onDelegate: true
+                  source:
+                    type: Inline
+                    spec:
+                      script: "# Determine the ServiceNow incident to update:\n#   1. the servicenow_incident_number pipeline input (manual/API runs), else\n#   2. an INC number in the PR title, e.g. \"Fix ... [INC0010033]\".\n# Values arrive via env vars; we only accept a strict INC<digits>\n# token so null/absent PR titles or inputs resolve to \"no incident\".\nINC=\"\"\nif printf '%s' \"$INPUT_INC\" | grep -Eq 'INC[0-9]+'; then\n  INC=$(printf '%s' \"$INPUT_INC\" | grep -Eo 'INC[0-9]+' | head -1)\nelif printf '%s' \"$PR_TITLE\" | grep -Eq 'INC[0-9]+'; then\n  INC=$(printf '%s' \"$PR_TITLE\" | grep -Eo 'INC[0-9]+' | head -1)\nfi\nif [ -n \"$INC\" ]; then HAS_INCIDENT=\"true\"; else HAS_INCIDENT=\"false\"; fi\necho \"Resolved ServiceNow incident: '$INC' (has_incident=$HAS_INCIDENT)\"\nexport INCIDENT_NUMBER=\"$INC\"\nexport HAS_INCIDENT=\"$HAS_INCIDENT\""
+                  environmentVariables:
+                  - name: INPUT_INC
+                    type: String
+                    value: <+pipeline.variables.servicenow_incident_number>
+                  - name: PR_TITLE
+                    type: String
+                    value: <+codebase.prTitle>
+                  outputVariables:
+                  - name: INCIDENT_NUMBER
+                    type: String
+                    value: INCIDENT_NUMBER
+                  - name: HAS_INCIDENT
+                    type: String
+                    value: HAS_INCIDENT
+                  delegateSelectors:
+                  - <+pipeline.variables.delegate_selector>
+                timeout: 2m
+            - step:
+                type: ServiceNowUpdate
+                name: Update Incident Work Notes
+                identifier: Update_Incident_Work_Notes
+                spec:
+                  useServiceNowTemplate: false
+                  connectorRef: <+pipeline.variables.servicenow_connector>
+                  ticketType: incident
+                  ticketNumber: <+execution.steps.Resolve_Incident_Number.output.outputVariables.INCIDENT_NUMBER>
+                  fields:
+                  - name: work_notes
+                    value: '<+pipeline.name> deploy completed successfully via Harness. Image tag: <+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].tag>'
+                timeout: 2m
+                failureStrategies:
+                - onFailure:
+                    errors:
+                    - AllErrors
+                    action:
+                      type: Ignore
+                when:
+                  stageStatus: Success
+                  condition: <+execution.steps.Resolve_Incident_Number.output.outputVariables.HAS_INCIDENT> == "true"
+    - stage:
+        name: Provision Infra
+        identifier: Provision_Infra
+        description: ''
+        type: IACM
+        spec:
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          workspace: <+input>
+          execution:
+            steps:
+            - step:
+                type: IACMOpenTofuPlugin
+                name: init
+                identifier: init
+                timeout: 10m
+                spec:
+                  command: init
+            - step:
+                type: IACMOpenTofuPlugin
+                name: plan
+                identifier: plan
+                timeout: 10m
+                spec:
+                  command: plan
+            - step:
+                type: IACMApproval
+                name: IACMApproval_1
+                identifier: IACMApproval_1
+                spec:
+                  autoApprove: true
+                timeout: 10m
+            - step:
+                type: IACMOpenTofuPlugin
+                name: apply
+                identifier: apply
+                timeout: 10m
+                spec:
+                  command: apply
+        tags: {}
+    - stage:
+        name: Deploy to Dev
+        identifier: Deploy_to_Dev
+        description: Deploy the application to the dev environment
+        type: Deployment
+        spec:
+          deploymentType: NativeHelm
+          service:
+            serviceRef: <+input>
+            serviceInputs:
+              serviceDefinition:
+                type: NativeHelm
+                spec:
+                  artifacts:
+                    primary:
+                      primaryArtifactRef: <+input>
+          environment:
+            environmentRef: <+input>
+            gitBranch: <+input>
+            deployToAll: false
+            infrastructureDefinitions: <+input>
+          execution:
+            steps:
+            - step:
+                type: HelmCanaryDeploy
+                name: HelmCanaryDeploy_1
+                identifier: HelmCanaryDeploy_1
+                spec:
+                  ignoreReleaseHistFailStatus: false
+                  skipSteadyStateCheck: false
+                  instanceSelection:
+                    type: Count
+                    spec:
+                      count: 1
+                  delegateSelectors:
+                  - <+pipeline.variables.delegate_selector>
+                  commandFlags:
+                  - commandType: Install
+                    flag: --set image.tag=<+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].tag>,image.repository="<+pipeline.variables.aws_account_id>.dkr.ecr.<+pipeline.variables.aws_region>.amazonaws.com/<+pipeline.variables.ecr_image_path>"
+                  - commandType: Upgrade
+                    flag: --set image.tag=<+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].tag>,image.repository="<+pipeline.variables.aws_account_id>.dkr.ecr.<+pipeline.variables.aws_region>.amazonaws.com/<+pipeline.variables.ecr_image_path>"
+                timeout: 10m
+            rollbackSteps:
+            - step:
+                type: HelmRollback
+                name: Helm Rollback
+                identifier: Helm_Rollback
+                spec: {}
+                timeout: 10m
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+        tags: {}
+        failureStrategies:
+        - onFailure:
+            errors:
+            - AllErrors
+            action:
+              type: StageRollback

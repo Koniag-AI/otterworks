@@ -1,0 +1,90 @@
+pipeline:
+  name: Build and Deploy Search Service
+  identifier: Build_and_Deploy_search_service
+  projectIdentifier: default_project
+  orgIdentifier: default
+  tags:
+    application: search-service
+  template:
+    templateRef: Otterworks_Build_Deploy_Template
+    versionLabel: v2
+    templateInputs:
+      properties:
+        ci:
+          codebase:
+            connectorRef: KGS_AI_Github
+            repoName: otterworks
+            build: <+input>
+      variables:
+      - name: servicenow_incident_number
+        type: String
+        value: <+input>.default("")
+      - name: aws_connector
+        type: String
+        value: <+input>.default("KGS_AWS_ALERT_environment")
+      - name: aws_account_id
+        type: String
+        value: <+input>.default("178707646889")
+      - name: aws_region
+        type: String
+        value: <+input>.default("us-east-1")
+      - name: ecr_image_path
+        type: String
+        value: otterworks/search-service
+      - name: service_workspace
+        type: String
+        value: ./services/search-service
+      - name: build_context
+        type: String
+        value: ./services/search-service
+      - name: dockerfile_path
+        type: String
+        value: ./services/search-service/Dockerfile
+      - name: build_image
+        type: String
+        value: python:3.12
+      - name: sonar_project_key
+        type: String
+        value: <+input>.default("Koniag-gs")
+      - name: delegate_selector
+        type: String
+        value: <+input>.default("terraform-delegate")
+      - name: servicenow_connector
+        type: String
+        value: <+input>.default("koniaggovernmentservicesllcdemo1")
+      - name: build_command
+        type: String
+        value: pip install -r requirements.txt
+      - name: test_command
+        type: String
+        value: pip install -r requirements-dev.txt && python -m pytest --cov=app
+      - name: static_analysis_command
+        type: String
+        value: pip install ruff && ruff check .
+      - name: test_intelligence
+        type: String
+        value: 'false'
+      stages:
+      - stage:
+          identifier: Provision_Infra
+          type: IACM
+          spec:
+            workspace: koniagcognitionharnessworkspace
+      - stage:
+          identifier: Deploy_to_Dev
+          type: Deployment
+          spec:
+            service:
+              serviceRef: otterworks_searchservice
+              serviceInputs:
+                serviceDefinition:
+                  type: NativeHelm
+                  spec:
+                    artifacts:
+                      primary:
+                        primaryArtifactRef: search_service
+            environment:
+              environmentRef: alert_dev
+              gitBranch: harness-dev-env-patch
+              infrastructureDefinitions:
+              - identifier: alertdevinfra_nativehelm
