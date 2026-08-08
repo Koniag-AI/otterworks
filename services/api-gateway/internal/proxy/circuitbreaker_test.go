@@ -142,6 +142,89 @@ func TestCircuitBreaker_RecoveryFromHalfOpen(t *testing.T) {
 	assert.Equal(t, StateClosed, cb.State())
 }
 
+func TestCircuitBreaker_HalfOpenProbeSlotReleasedOnPanic(t *testing.T) {
+	cfg := CircuitBreakerConfig{
+		MaxRequests:  2,
+		Interval:     60 * time.Second,
+		Timeout:      5 * time.Second,
+		FailureRatio: 0.5,
+	}
+	cb := NewCircuitBreaker("test-svc", cfg)
+
+	now := time.Now()
+	cb.now = func() time.Time { return now }
+
+	failHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("backend blew up")
+	})
+	successHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	for i := 0; i < 6; i++ {
+		cb.Execute(failHandler, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	}
+	require.Equal(t, StateOpen, cb.State())
+
+	cb.now = func() time.Time { return now.Add(6 * time.Second) }
+	require.Equal(t, StateHalfOpen, cb.State())
+
+	// A panicking probe must count as a failure rather than silently consuming
+	// a half-open slot, which would wedge the breaker permanently.
+	assert.Panics(t, func() {
+		cb.Execute(panicHandler, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	})
+	assert.Equal(t, StateOpen, cb.State())
+
+	cb.now = func() time.Time { return now.Add(12 * time.Second) }
+	for i := 0; i < 2; i++ {
+		require.NoError(t, cb.Execute(successHandler, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil)))
+	}
+	assert.Equal(t, StateClosed, cb.State())
+}
+
+func TestCircuitBreaker_HalfOpenTimesOutBackToOpen(t *testing.T) {
+	cfg := CircuitBreakerConfig{
+		MaxRequests:  2,
+		Interval:     60 * time.Second,
+		Timeout:      5 * time.Second,
+		FailureRatio: 0.5,
+	}
+	cb := NewCircuitBreaker("test-svc", cfg)
+
+	now := time.Now()
+	cb.now = func() time.Time { return now }
+
+	failHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	})
+	successHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	for i := 0; i < 6; i++ {
+		cb.Execute(failHandler, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	}
+	require.Equal(t, StateOpen, cb.State())
+
+	// Enter half-open, then let the probe window elapse without closing.
+	cb.now = func() time.Time { return now.Add(6 * time.Second) }
+	require.Equal(t, StateHalfOpen, cb.State())
+
+	cb.now = func() time.Time { return now.Add(12 * time.Second) }
+	assert.Equal(t, StateOpen, cb.State())
+
+	// After another timeout the breaker offers probes again and can recover.
+	cb.now = func() time.Time { return now.Add(18 * time.Second) }
+	for i := 0; i < 2; i++ {
+		require.NoError(t, cb.Execute(successHandler, httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil)))
+	}
+	assert.Equal(t, StateClosed, cb.State())
+}
+
 func TestCircuitBreakerManager_GetOrCreate(t *testing.T) {
 	mgr := NewCircuitBreakerManager(defaultTestConfig())
 

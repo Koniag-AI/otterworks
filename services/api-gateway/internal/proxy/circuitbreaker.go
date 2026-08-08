@@ -107,6 +107,13 @@ func (cb *CircuitBreaker) currentState() CircuitState {
 		if cb.expiry.Before(now) {
 			cb.setState(StateHalfOpen, now)
 		}
+	case StateHalfOpen:
+		// Probes get a bounded window to settle. If it elapses without the
+		// breaker closing, fall back to open so a fresh round of probes is
+		// scheduled instead of the breaker wedging in half-open forever.
+		if !cb.expiry.IsZero() && cb.expiry.Before(now) {
+			cb.setState(StateOpen, now)
+		}
 	}
 	return cb.state
 }
@@ -123,7 +130,7 @@ func (cb *CircuitBreaker) setState(state CircuitState, now time.Time) {
 	case StateOpen:
 		cb.expiry = now.Add(cb.config.Timeout)
 	case StateHalfOpen:
-		cb.expiry = time.Time{}
+		cb.expiry = now.Add(cb.config.Timeout)
 	}
 }
 
@@ -156,16 +163,23 @@ func (cb *CircuitBreaker) Execute(handler http.Handler, w http.ResponseWriter, r
 
 	// Use a response recorder to detect failures
 	rec := &statusRecorder{ResponseWriter: w, statusCode: http.StatusOK}
+
+	// Record the outcome even if the handler panics, otherwise the half-open
+	// probe slot is consumed permanently and the breaker can never close.
+	failed := true
+	defer func() {
+		cb.mu.Lock()
+		defer cb.mu.Unlock()
+		if failed {
+			cb.onFailure()
+			return
+		}
+		cb.onSuccess()
+	}()
+
 	handler.ServeHTTP(rec, r)
+	failed = rec.statusCode >= 500
 
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	if rec.statusCode >= 500 {
-		cb.onFailure()
-		return nil
-	}
-	cb.onSuccess()
 	return nil
 }
 
