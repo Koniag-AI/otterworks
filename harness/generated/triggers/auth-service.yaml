@@ -1,0 +1,29 @@
+trigger:
+  name: On merge to main - auth-service
+  identifier: on_merge_auth_service
+  enabled: false
+  description: Build and deploy auth-service when a PR is merged into main.
+  orgIdentifier: default
+  projectIdentifier: default_project
+  pipelineIdentifier: Build_and_Deploy_auth_service
+  tags:
+    application: auth-service
+  source:
+    type: Webhook
+    spec:
+      type: Github
+      spec:
+        type: Push
+        spec:
+          connectorRef: KGS_AI_Github
+          repoName: otterworks
+          autoAbortPreviousExecutions: true
+          payloadConditions:
+          - key: targetBranch
+            operator: Equals
+            value: main
+          - key: changedFiles
+            operator: Regex
+            value: ^services/auth-service/.*
+          headerConditions: []
+  inputYaml: "pipeline:\n  identifier: Build_and_Deploy_auth_service\n  template:\n    templateInputs:\n      properties:\n        ci:\n          codebase:\n            build:\n              type: branch\n              spec:\n                branch: main\n      variables:\n      - name: servicenow_incident_number\n        type: String\n        value: <+trigger.payload.head_commit.message>\n"

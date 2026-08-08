@@ -1,25 +1,44 @@
-# ServiceNow → Devin Automations Webhook Integration
+# ServiceNow → Devin → Harness: the ALERT workflow
 
-Connects ServiceNow incident management to Devin AI for automated bug remediation using **Devin Automations webhooks** — no custom middleware (Lambda, Flask, or Rails session-creation code) required.
+Connects ServiceNow incident management to Devin and Harness using **Devin Automations
+webhooks** — no custom middleware (Lambda, Flask, or Rails session-creation code)
+required.
 
-## Architecture
+## Flow
 
 ```
-┌─────────────┐  Business Rule   ┌─────────────────────────┐  auto-start   ┌────────────────┐
-│  ServiceNow │ ─── webhook ───▶ │  Devin Automations      │ ───────────▶ │  Devin Session │
-│  Incident   │                  │  (managed by Devin)     │              │  (+ playbook)  │
-│             │ ◀── work note ─  │  payload → prompt ctx   │              │                │
-└─────────────┘  (from session)  └─────────────────────────┘              └────────────────┘
+ end user            Devin triage         requester        product owner
+ files incident  →   valid? enrich   →   answers      →   approves
+                     or ask                questions        or rejects
+                          │                                     │
+                          └──────── awaiting_info ───────────────┘
+                                                                 ↓
+ Harness deploy   ←   tech lead      ←   Devin remediation  ←  development
+ (on merge)           approves+merges     opens PR
+       ↓
+  verified → closed        (deploy failure → back to development)
 ```
 
-**Flow:**
-1. User creates a Software/Critical incident in ServiceNow
-2. Business Rule fires → POSTs incident JSON directly to the Devin Automation webhook URL
-3. Devin Automations starts a session with the ServiceNow payload as context
-4. The session follows the `ServiceNow Incident Auto-Remediation` playbook
-5. Devin investigates the bug, opens a PR, and posts a work note back to ServiceNow
+Every arrow is a `u_alert_stage` change on the incident; ServiceNow remains the system
+of record and each Devin session is started by a stage change rather than an ad-hoc call.
+The two Devin sessions are deliberately separate: **triage never writes code**, and
+**remediation only runs after a product owner has approved the issue**.
 
-### What changed from the previous (direct API) approach
+The design rationale, gate ownership, and rollout sequencing live in
+`ALERT_TICKET_WORKFLOW_DESIGN.md` in the `kgs-alert` repository.
+
+### What changed from the previous (single-session) approach
+
+| Before | After |
+|---|---|
+| One session: investigate + fix + PR, on incident insert | Two stage-triggered sessions: triage, then remediation after approval |
+| No validity judgement | `u_devin_verdict` + `u_devin_confidence`, with low confidence routed to a human |
+| No way to ask the requester anything | `awaiting_info` stage posts questions as a customer-visible comment and resumes on the answer |
+| No approval before code was written | Product-owner approval gates the development stage |
+| PR merge enforced by nothing | `CODEOWNERS` + branch protection; Devin cannot approve or merge its own PR |
+| Merge did not start a pipeline | Per-application Harness push triggers (`harness/generated/triggers/`) |
+
+### What changed from the original (direct API) approach
 
 | Before (Direct Devin API) | After (Automations Webhook) |
 |---|---|
@@ -32,36 +51,36 @@ Connects ServiceNow incident management to Devin AI for automated bug remediatio
 
 ## Setup
 
-### 1. Create the Devin Playbook
+Follow these in order — each step is inert until the next one enables it.
 
-The playbook `ServiceNow Incident Auto-Remediation (Webhook)` should already exist in **Devin Settings → Playbooks**. If not, create it following the template in [PLAYBOOK.md](./PLAYBOOK.md).
+1. **ServiceNow configuration:** [alert-workflow/README.md](./alert-workflow/README.md) —
+   install script, owner mapping table, form layout, and the staged activation order.
+2. **Devin playbooks and automations:** [AUTOMATION_SETUP.md](./AUTOMATION_SETUP.md).
+3. **GitHub gate:** `.github/CODEOWNERS` plus branch protection on the deploy branch
+   (required code-owner review, no self-approval).
+4. **Harness deploy on merge:** set `merge_trigger_enabled: true` for one application in
+   `harness/apps.yaml`, then
+   `python3 harness/sync_harness.py --apply --apply-triggers --only <app>`.
 
-### 2. Create the Devin Automation
-
-See [AUTOMATION_SETUP.md](./AUTOMATION_SETUP.md) for step-by-step instructions to create the webhook automation in the Devin UI.
-
-### 3. Configure ServiceNow
-
-See [SERVICENOW_SETUP.md](./SERVICENOW_SETUP.md) for configuring the Business Rule and Outbound REST Message.
-
-**Key change:** The REST Message endpoint is now the Devin Automation webhook URL (from step 2) instead of a Lambda/API Gateway URL.
-
-### 4. Test
+### Test
 
 ```bash
-# Simulate a ServiceNow webhook hitting the Devin Automation:
+# Simulate a ServiceNow webhook hitting a Devin Automation:
 python3 test_webhook_e2e.py
 ```
 
-Or create an incident in ServiceNow with Category=Software and Priority=1-Critical.
+Or create a pilot incident in ServiceNow (Category=Software, ALERT pilot checked).
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `AUTOMATION_SETUP.md` | Step-by-step Devin Automation creation guide |
-| `SERVICENOW_SETUP.md` | ServiceNow configuration (Business Rule + REST Message) |
-| `PLAYBOOK.md` | Devin playbook content for the remediation session |
+| `alert-workflow/` | ServiceNow install/verify/uninstall scripts and the configuration guide |
+| `AUTOMATION_SETUP.md` | The two Devin automations (triage, remediation) |
+| `PLAYBOOK_A_TRIAGE.md` | Triage playbook: validity, enrichment, questions. Writes no code |
+| `PLAYBOOK_B_REMEDIATION.md` | Remediation playbook: implement approved fix, open PR |
+| `SERVICENOW_SETUP.md` | Superseded — the single-rule setup of the previous flow |
+| `PLAYBOOK.md` | Superseded — the single-session playbook of the previous flow |
 | `test_webhook_e2e.py` | E2E test: creates a SNOW incident → verifies work note callback |
 | `test_lambda_local.py` | Legacy tests for the old Lambda handler (archived) |
 

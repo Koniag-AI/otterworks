@@ -1,3 +1,9 @@
+> **Superseded.** This is the single-rule setup for the previous one-session flow.
+> For the ALERT workflow (triage → requester loop → owner approval → remediation →
+> tech-lead merge → Harness), use [alert-workflow/README.md](./alert-workflow/README.md).
+> Deactivate the `Trigger Devin Remediation` rule described below when you activate
+> `ALERT: start triage`, or a pilot incident will start both flows.
+
 # ServiceNow Configuration Guide (Automations Webhook)
 
 Step-by-step instructions for configuring ServiceNow to send incident webhooks
