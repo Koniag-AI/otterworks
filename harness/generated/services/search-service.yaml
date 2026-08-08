@@ -1,0 +1,41 @@
+service:
+  name: otterworks_search-service
+  identifier: otterworks_searchservice
+  orgIdentifier: default
+  projectIdentifier: default_project
+  serviceDefinition:
+    type: NativeHelm
+    spec:
+      manifests:
+      - manifest:
+          identifier: search_service
+          type: HelmChart
+          spec:
+            store:
+              type: Github
+              spec:
+                connectorRef: KGS_AI_Github
+                gitFetchType: Branch
+                folderPath: infrastructure/helm/search-service
+                repoName: otterworks
+                branch: main
+            subChartPath: ''
+            valuesPaths:
+            - infrastructure/helm/search-service/values.yaml
+            optionalValuesYaml: false
+            skipResourceVersioning: false
+            enableDeclarativeRollback: false
+            helmVersion: V3
+            fetchHelmChartMetadata: false
+      artifacts:
+        primary:
+          primaryArtifactRef: <+input>
+          sources:
+          - identifier: search_service
+            type: Ecr
+            spec:
+              connectorRef: KGS_AWS_ALERT_environment
+              imagePath: otterworks/search-service
+              tag: <+pipeline.stages.Build_Otterworks.spec.execution.steps.Build_and_Push_API_Gateway_Image_to_ECR.artifact_Build_and_Push_API_Gateway_Image_to_ECR.stepArtifacts.publishedImageArtifacts[0].tag>
+              digest: ''
+              region: us-east-1

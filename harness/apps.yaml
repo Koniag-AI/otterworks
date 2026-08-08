@@ -1,0 +1,136 @@
+# Per-application inputs for the Harness pipeline template
+# "Otterworks Build Deploy Template" (project default_project, org default).
+#
+# Every application below gets one Harness service (NativeHelm, Helm chart from
+# this repo) and one pipeline that is a thin instance of the shared template.
+# api-gateway is listed for completeness: its service and pipeline already exist
+# ("Build and Deploy Otterworks Application") and are left untouched unless
+# sync_harness.py is run with --include-api-gateway.
+
+defaults:
+  org: default
+  project: default_project
+  template_ref: Otterworks_Build_Deploy_Template
+  template_version: v2
+  codebase_connector: KGS_AI_Github
+  codebase_repo: otterworks
+  helm_branch: main
+  aws_connector: KGS_AWS_ALERT_environment
+  aws_account_id: "178707646889"
+  aws_region: us-east-1
+  sonar_project_key: Koniag-gs
+  delegate_selector: terraform-delegate
+  servicenow_connector: koniaggovernmentservicesllcdemo1
+  iacm_workspace: koniagcognitionharnessworkspace
+  environment: alert_dev
+  environment_git_branch: harness-dev-env-patch
+  infrastructure: alertdevinfra_nativehelm
+
+apps:
+  - name: api-gateway
+    path: services/api-gateway
+    language: Go
+    build_image: golang:1.22
+    build_command: go build -o /dev/null ./cmd/server
+    test_command: go test -race -coverprofile=coverage.out ./...
+    static_analysis_command: go vet ./...
+    test_intelligence: "true"
+
+  - name: auth-service
+    path: services/auth-service
+    language: Java (Gradle)
+    build_image: gradle:8.6-jdk17
+    build_command: gradle bootJar --no-daemon
+    test_command: gradle test --no-daemon
+    static_analysis_command: gradle spotlessCheck --no-daemon
+
+  - name: notification-service
+    path: services/notification-service
+    language: Kotlin (Gradle)
+    build_image: gradle:8.6-jdk17
+    build_command: gradle build -x test --no-daemon
+    test_command: gradle test --no-daemon
+    static_analysis_command: gradle check -x test --no-daemon
+
+  - name: report-service
+    path: services/report-service
+    language: Java 8 (Maven)
+    build_image: maven:3.8.7-eclipse-temurin-8
+    build_command: mvn package -DskipTests -B -q
+    test_command: mvn test -B
+    static_analysis_command: mvn compile -B -q
+
+  - name: analytics-service
+    path: services/analytics-service
+    language: Scala (sbt)
+    build_image: sbtscala/scala-sbt:eclipse-temurin-jammy-17.0.10_7_1.9.9_3.4.1
+    build_command: sbt -batch compile
+    test_command: sbt -batch test
+    static_analysis_command: sbt -batch "set scalacOptions += \"-Xfatal-warnings\"; compile"
+
+  - name: audit-service
+    path: services/audit-service
+    language: C# (.NET 8)
+    build_image: mcr.microsoft.com/dotnet/sdk:8.0
+    build_command: dotnet build --configuration Release
+    test_command: dotnet test
+    static_analysis_command: dotnet format --verify-no-changes
+
+  - name: file-service
+    path: services/file-service
+    language: Rust
+    build_image: rust:1.79
+    build_command: cargo build --release
+    test_command: cargo test
+    static_analysis_command: cargo clippy -- -D warnings
+
+  - name: document-service
+    path: services/document-service
+    language: Python (Poetry)
+    build_image: python:3.12
+    build_command: pip install poetry==1.8.2 && poetry install
+    test_command: pip install poetry==1.8.2 && poetry install && poetry run pytest --cov=app
+    static_analysis_command: pip install ruff && ruff check .
+
+  - name: search-service
+    path: services/search-service
+    language: Python (pip)
+    build_image: python:3.12
+    build_command: pip install -r requirements.txt
+    test_command: pip install -r requirements-dev.txt && python -m pytest --cov=app
+    static_analysis_command: pip install ruff && ruff check .
+
+  - name: admin-service
+    path: services/admin-service
+    language: Ruby (Rails)
+    build_image: ruby:3.3
+    build_command: bundle install --jobs 4 --retry 3
+    # rspec needs the Postgres/Redis dependencies the GitHub workflow starts as
+    # service containers; the template has no service-dependency support yet, so
+    # tests are limited to the ones that run without them.
+    test_command: bundle install --jobs 4 --retry 3 && bundle exec rspec --tag ~db
+    static_analysis_command: bundle install --jobs 4 --retry 3 && bundle exec rubocop --parallel
+
+  - name: collab-service
+    path: services/collab-service
+    language: Node.js (TypeScript)
+    build_image: node:20
+    build_command: npm ci && npm run build
+    test_command: npm ci && npm test
+    static_analysis_command: npm ci && npm run lint
+
+  - name: web-app
+    path: frontend/web-app
+    language: Next.js
+    build_image: node:20
+    build_command: npm ci && npm run build
+    test_command: npm ci && npm test
+    static_analysis_command: npm ci && npm run lint
+
+  - name: admin-dashboard
+    path: frontend/admin-dashboard
+    language: Angular
+    build_image: node:20
+    build_command: npm ci && npm run build
+    test_command: npm ci && npm test -- --watch=false --browsers=ChromeHeadless
+    static_analysis_command: npm ci && npm run lint
