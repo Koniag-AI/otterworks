@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Render and (optionally) apply the Harness services and template-based
-pipelines for every OtterWorks application described in harness/apps.yaml.
+"""Render and (optionally) apply the Harness services, template-based pipelines
+and merge triggers for every OtterWorks application described in harness/apps.yaml.
 
 Each pipeline is a thin instance of the shared pipeline template
 "Otterworks Build Deploy Template" - it only supplies template inputs
@@ -8,9 +8,16 @@ Each pipeline is a thin instance of the shared pipeline template
 environment and infrastructure), so the build/scan/supply-chain/deploy logic
 lives in exactly one place.
 
+Each application also gets one push trigger that starts its pipeline when a PR is
+merged into the deploy branch. Triggers are rendered from apps.yaml like
+everything else and are created disabled unless the application sets
+merge_trigger_enabled: true, so enabling a merge-to-deploy path is a reviewable
+one-line change instead of a click in the Harness UI.
+
 Usage:
   python3 harness/sync_harness.py                 # render YAML into harness/generated
   python3 harness/sync_harness.py --apply         # render, then create/update in Harness
+  python3 harness/sync_harness.py --apply --apply-triggers  # also sync merge triggers
   python3 harness/sync_harness.py --apply --only auth-service
 
 Requires HARNESS_API_KEY (a Harness PAT/SAT) when --apply is used;
@@ -212,6 +219,79 @@ def pipeline_yaml(app: dict, d: dict) -> str:
     return yaml.safe_dump(pipeline, sort_keys=False, width=10000)
 
 
+def trigger_identifier(name: str) -> str:
+    return "on_merge_%s" % identifier(name)
+
+
+def trigger_yaml(app: dict, d: dict) -> str:
+    """Push trigger that runs the application pipeline on a merge to the deploy
+    branch, scoped to the files of that application so one merge does not rebuild
+    every OtterWorks app."""
+    pipeline_id = "Build_and_Deploy_%s" % identifier(app["name"])
+    branch = d["deploy_branch"]
+    inputs = {
+        "pipeline": {
+            "identifier": pipeline_id,
+            "template": {
+                "templateInputs": {
+                    "properties": {
+                        "ci": {"codebase": {"build": {"type": "branch", "spec": {"branch": branch}}}}
+                    },
+                    # The template resolves the incident from the first INC<digits>
+                    # token it finds, so the squashed merge commit subject (which
+                    # carries the PR title, e.g. "fix(file-service): ... [INC0010042]")
+                    # is enough to correlate the deploy with the ServiceNow record.
+                    "variables": [
+                        {
+                            "name": "servicenow_incident_number",
+                            "type": "String",
+                            "value": "<+trigger.payload.head_commit.message>",
+                        }
+                    ],
+                }
+            },
+        }
+    }
+    trigger = {
+        "trigger": {
+            "name": "On merge to %s - %s" % (branch, app["name"]),
+            "identifier": trigger_identifier(app["name"]),
+            "enabled": bool(app.get("merge_trigger_enabled", False)),
+            "description": "Build and deploy %s when a PR is merged into %s."
+            % (app["name"], branch),
+            "orgIdentifier": d["org"],
+            "projectIdentifier": d["project"],
+            "pipelineIdentifier": pipeline_id,
+            "tags": {"application": app["name"]},
+            "source": {
+                "type": "Webhook",
+                "spec": {
+                    "type": "Github",
+                    "spec": {
+                        "type": "Push",
+                        "spec": {
+                            "connectorRef": d["codebase_connector"],
+                            "repoName": d["codebase_repo"],
+                            "autoAbortPreviousExecutions": True,
+                            "payloadConditions": [
+                                {"key": "targetBranch", "operator": "Equals", "value": branch},
+                                {
+                                    "key": "changedFiles",
+                                    "operator": "Regex",
+                                    "value": "^%s/.*" % app["path"],
+                                },
+                            ],
+                            "headerConditions": [],
+                        },
+                    },
+                },
+            },
+            "inputYaml": yaml.safe_dump(inputs, sort_keys=False, width=10000),
+        }
+    }
+    return yaml.safe_dump(trigger, sort_keys=False, width=10000)
+
+
 class Harness:
     def __init__(self) -> None:
         self.key = os.environ["HARNESS_API_KEY"]
@@ -272,6 +352,27 @@ class Harness:
                 return "updated"
         raise RuntimeError("pipeline %s failed (%s): %s" % (ident, status, text[:400]))
 
+    def upsert_trigger(
+        self, ident: str, org: str, project: str, pipeline_id: str, trg_yaml: str
+    ) -> str:
+        params = {
+            "orgIdentifier": org,
+            "projectIdentifier": project,
+            "targetIdentifier": pipeline_id,
+        }
+        status, text = self._call(
+            "POST", "/pipeline/api/triggers", params, trg_yaml, "application/yaml"
+        )
+        if status == 200:
+            return "created"
+        if "already exists" in text or "DUPLICATE_FIELD" in text:
+            status, text = self._call(
+                "PUT", "/pipeline/api/triggers/%s" % ident, params, trg_yaml, "application/yaml"
+            )
+            if status == 200:
+                return "updated"
+        raise RuntimeError("trigger %s failed (%s): %s" % (ident, status, text[:400]))
+
     def upsert_template(self, org: str, project: str, tpl_yaml: str) -> str:
         params = {"orgIdentifier": org, "projectIdentifier": project}
         status, text = self._call(
@@ -294,6 +395,11 @@ def main() -> int:
         help="also create the pipeline template version from harness/template/",
     )
     ap.add_argument(
+        "--apply-triggers",
+        action="store_true",
+        help="also create/update the merge triggers (requires --apply)",
+    )
+    ap.add_argument(
         "--include-api-gateway",
         action="store_true",
         help="also render/apply api-gateway (it already has a hand-built pipeline)",
@@ -313,6 +419,7 @@ def main() -> int:
 
     (GENERATED_DIR / "services").mkdir(parents=True, exist_ok=True)
     (GENERATED_DIR / "pipelines").mkdir(parents=True, exist_ok=True)
+    (GENERATED_DIR / "triggers").mkdir(parents=True, exist_ok=True)
 
     harness = Harness() if args.apply else None
     if harness is not None and args.apply_template:
@@ -323,8 +430,10 @@ def main() -> int:
     for app in apps:
         svc = service_yaml(app, d)
         pipe = pipeline_yaml(app, d)
+        trg = trigger_yaml(app, d)
         (GENERATED_DIR / "services" / ("%s.yaml" % app["name"])).write_text(svc)
         (GENERATED_DIR / "pipelines" / ("%s.yaml" % app["name"])).write_text(pipe)
+        (GENERATED_DIR / "triggers" / ("%s.yaml" % app["name"])).write_text(trg)
         if harness is None:
             print("rendered %s" % app["name"])
             continue
@@ -335,10 +444,20 @@ def main() -> int:
             d["project"],
             svc,
         )
-        pipe_action = harness.upsert_pipeline(
-            "Build_and_Deploy_%s" % identifier(app["name"]), d["org"], d["project"], pipe
+        pipeline_id = "Build_and_Deploy_%s" % identifier(app["name"])
+        pipe_action = harness.upsert_pipeline(pipeline_id, d["org"], d["project"], pipe)
+        trg_action = "skipped"
+        if args.apply_triggers:
+            trg_action = harness.upsert_trigger(
+                trigger_identifier(app["name"]), d["org"], d["project"], pipeline_id, trg
+            )
+            trg_action += " (%s)" % (
+                "enabled" if app.get("merge_trigger_enabled", False) else "disabled"
+            )
+        print(
+            "%-22s service=%s pipeline=%s trigger=%s"
+            % (app["name"], svc_action, pipe_action, trg_action)
         )
-        print("%-22s service=%s pipeline=%s" % (app["name"], svc_action, pipe_action))
     return 0
 
 

@@ -15,6 +15,8 @@ defaults:
   codebase_connector: KGS_AI_Github
   codebase_repo: otterworks
   helm_branch: main
+  # Branch whose merges start the pipelines (see generated/triggers).
+  deploy_branch: main
   aws_connector: KGS_AWS_ALERT_environment
   aws_account_id: "178707646889"
   aws_region: us-east-1
@@ -76,8 +78,12 @@ apps:
     test_command: dotnet test
     static_analysis_command: dotnet format --verify-no-changes
 
+  # merge_trigger_enabled turns the push trigger on for an application; every
+  # other application keeps its trigger created-but-disabled until a full
+  # merge -> deploy cycle has been observed here.
   - name: file-service
     path: services/file-service
+    merge_trigger_enabled: false
     language: Rust
     build_image: rust:1.79
     build_command: cargo build --release

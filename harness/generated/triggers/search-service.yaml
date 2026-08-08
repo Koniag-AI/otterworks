@@ -1,0 +1,29 @@
+trigger:
+  name: On merge to main - search-service
+  identifier: on_merge_search_service
+  enabled: false
+  description: Build and deploy search-service when a PR is merged into main.
+  orgIdentifier: default
+  projectIdentifier: default_project
+  pipelineIdentifier: Build_and_Deploy_search_service
+  tags:
+    application: search-service
+  source:
+    type: Webhook
+    spec:
+      type: Github
+      spec:
+        type: Push
+        spec:
+          connectorRef: KGS_AI_Github
+          repoName: otterworks
+          autoAbortPreviousExecutions: true
+          payloadConditions:
+          - key: targetBranch
+            operator: Equals
+            value: main
+          - key: changedFiles
+            operator: Regex
+            value: ^services/search-service/.*
+          headerConditions: []
+  inputYaml: "pipeline:\n  identifier: Build_and_Deploy_search_service\n  template:\n    templateInputs:\n      properties:\n        ci:\n          codebase:\n            build:\n              type: branch\n              spec:\n                branch: main\n      variables:\n      - name: servicenow_incident_number\n        type: String\n        value: <+trigger.payload.head_commit.message>\n"

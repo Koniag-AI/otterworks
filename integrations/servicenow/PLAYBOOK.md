@@ -1,3 +1,8 @@
+> **Superseded.** This single session did investigate + fix + PR in one pass. The ALERT
+> workflow splits it into [PLAYBOOK_A_TRIAGE.md](./PLAYBOOK_A_TRIAGE.md) (validity and
+> enrichment, no code) and [PLAYBOOK_B_REMEDIATION.md](./PLAYBOOK_B_REMEDIATION.md)
+> (implement an approved fix). Kept for reference.
+
 # Playbook: ServiceNow Incident Auto-Remediation (Webhook)
 
 This is the content of the Devin playbook used by the ServiceNow automation.

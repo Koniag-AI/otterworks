@@ -1,0 +1,32 @@
+# Review ownership for the ALERT workflow tech-lead gate.
+#
+# The remediation playbook requests review from the code owner of the service it
+# changed; branch protection on the deploy branch makes that review required, so
+# a Devin PR cannot reach the merge -> Harness step without a named human.
+#
+# The per-service teams below are placeholders: replace @Koniag-AI/otterworks-tech-leads
+# with the real tech-lead team for each service. Keep the same team in the
+# u_alert_service_owner mapping table in ServiceNow so the product-owner approval
+# and the PR review route to consistent people.
+
+*                                   @Koniag-AI/otterworks-tech-leads
+
+services/admin-service/             @Koniag-AI/otterworks-tech-leads
+services/analytics-service/         @Koniag-AI/otterworks-tech-leads
+services/api-gateway/               @Koniag-AI/otterworks-tech-leads
+services/audit-service/             @Koniag-AI/otterworks-tech-leads
+services/auth-service/              @Koniag-AI/otterworks-tech-leads
+services/collab-service/            @Koniag-AI/otterworks-tech-leads
+services/document-service/          @Koniag-AI/otterworks-tech-leads
+services/file-service/              @Koniag-AI/otterworks-tech-leads
+services/notification-service/      @Koniag-AI/otterworks-tech-leads
+services/report-service/            @Koniag-AI/otterworks-tech-leads
+services/search-service/            @Koniag-AI/otterworks-tech-leads
+frontend/web-app/                   @Koniag-AI/otterworks-tech-leads
+frontend/admin-dashboard/           @Koniag-AI/otterworks-tech-leads
+
+# Delivery and governance configuration changes the deploy path itself.
+harness/                            @Koniag-AI/otterworks-tech-leads
+infrastructure/                     @Koniag-AI/otterworks-tech-leads
+integrations/servicenow/            @Koniag-AI/otterworks-tech-leads
+.github/                            @Koniag-AI/otterworks-tech-leads
